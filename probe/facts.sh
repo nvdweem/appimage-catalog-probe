@@ -13,4 +13,4 @@ echo "-- system bus: $(ls -la /run/dbus/system_bus_socket 2>&1)"
 
 # Run 2: test the candidate worker.sh fix (and drop an entry whose ':' breaks upload-artifact).
 bash probe/patch-worker.sh catalog/code/worker.sh
-rm -rf "catalog/database/fre:ac"
+find catalog/database -maxdepth 1 -name '*[:"<>|*?]*' -exec rm -rf {} +
