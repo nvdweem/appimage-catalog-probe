@@ -10,3 +10,7 @@ echo "-- dbus-launch: $(command -v dbus-launch || echo none)  at-spi-bus-launche
 echo "-- firefox: $(readlink -f "$(command -v firefox)") $(firefox --version 2>&1 | tail -1)"
 echo "-- existing firefox profiles:"; ls -la ~/.mozilla ~/snap 2>&1 | head
 echo "-- system bus: $(ls -la /run/dbus/system_bus_socket 2>&1)"
+
+# Run 2: test the candidate worker.sh fix (and drop an entry whose ':' breaks upload-artifact).
+bash probe/patch-worker.sh catalog/code/worker.sh
+rm -rf "catalog/database/fre:ac"
