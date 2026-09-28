@@ -1,0 +1,92 @@
+# Throwaway diagnostics: why does Firefox (opened by PCPanel) show only its 10x10 helper window in the
+# appimage.github.io test (AppImage/appimage.github.io#5449)? Runs their unmodified worker.sh on the same
+# runner image, with a sampler, a logging firefox wrapper and strace snapshots around it.
+name: probe
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  DISPLAY: ':99'
+
+jobs:
+  worker:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: AppImage/appimage.github.io
+          path: catalog
+      - name: Environment facts
+        run: bash probe/facts.sh | tee facts.txt
+      - name: Packages (same list as their test.yml)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq imagemagick libasound2-dev pulseaudio-utils alsa-utils alsa-oss libjack0 desktop-file-utils xmlstarlet xsel xterm xvfb icewm x11-utils x11-apps netpbm xdotool libgl1-mesa-dri libgl1-mesa-dev mesa-utils libosmesa6 libsdl1.2-dev libsdl2-2.0-0 fonts-wqy-microhei libfile-mimeinfo-perl tesseract-ocr tesseract-ocr-eng libfuse2 stalonetray strace bc
+      - name: Test dependencies (as their test.yml)
+        working-directory: catalog
+        run: |
+          bash code/fetch-deps.sh
+          cp -a deps/. .
+          sudo bash code/prep-dummy-soundcard.sh || true
+      - name: Their worker.sh, instrumented from outside
+        working-directory: catalog
+        env:
+          IS_PULLREQUEST: 'true'
+          STRICT: 'true'
+        run: |
+          mkdir -p $HOME/.icewm $HOME/probe
+          printf 'ShowTaskBar = 0\nTaskBarAutoHide = 1\n' > $HOME/.icewm/preferences
+          Xvfb :99 -screen 0 800x600x24 >/dev/null 2>&1 &
+          sudo install -m 0755 ../probe/firefox-wrapper.sh /usr/local/bin/firefox
+          echo "firefox resolves to: $(command -v firefox)"
+          echo "https://github.com/nvdweem/PCPanel" > data/PCPanel
+          sudo bash ../probe/sampler.sh $HOME/probe 150 > /dev/null 2>&1 &
+          SAMPLER=$!
+          timeout --kill-after=30 600 bash -e code/worker.sh "$(readlink -f data/PCPanel)" > $HOME/probe/worker.log 2>&1 || echo "worker exit $?"
+          wait $SAMPLER || true
+          grep -E "NUMBER_OF_WINDOWS|0x[0-9a-f]+ \"|Screenshot|ERROR|SUCCESS|Opening the UI|started in" $HOME/probe/worker.log | cut -c1-250 || true
+      - name: Summary
+        if: always()
+        run: |
+          echo "== firefox wrapper log"; cat $HOME/probe/ff-*.log 2>/dev/null | cut -c1-300 | head -120
+          echo "== window timeline"; cut -c1-250 $HOME/probe/timeline.log | head -80
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: worker-probe
+          path: |
+            ~/probe
+            facts.txt
+            catalog/failure-screens
+            catalog/database
+
+  direct:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: AppImage/appimage.github.io
+          path: catalog
+      - name: Packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq imagemagick xvfb icewm x11-utils xdotool libgl1-mesa-dri mesa-utils libosmesa6 libfuse2 strace bc
+      - name: Firejail (as worker.sh installs it)
+        working-directory: catalog
+        run: bash ../probe/install-firejail.sh
+      - name: Firefox alone in the same sandbox, per variant
+        run: |
+          Xvfb :99 -screen 0 800x600x24 >/dev/null 2>&1 &
+          sleep 2
+          bash probe/direct.sh $HOME/direct | tee direct.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: direct-probe
+          path: ~/direct
